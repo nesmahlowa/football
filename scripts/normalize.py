@@ -10,6 +10,10 @@ Responsibilities:
     - Preserve source provenance
     - Write normalized/<source_id>__*.json
 
+Supported formats:
+    - JSON
+    - Football.TXT
+
 This stage does NOT:
     - fetch remote data
     - deduplicate matches
@@ -19,6 +23,7 @@ This stage does NOT:
 
 from __future__ import annotations
 
+import calendar
 import json
 import re
 import sys
@@ -72,15 +77,18 @@ MONTHS = {
 
 
 # ============================================================================
-# BASIC UTILITIES
+# TIME
 # ============================================================================
 
 def utc_now() -> str:
-
     return datetime.now(
         timezone.utc
     ).isoformat()
 
+
+# ============================================================================
+# BASIC STRING UTILITIES
+# ============================================================================
 
 def clean_string(
     value: Any,
@@ -133,7 +141,6 @@ def normalize_status(
     ).strip().upper()
 
     mapping = {
-
         "SCHEDULED": "SCHEDULED",
         "UPCOMING": "SCHEDULED",
         "NOT_STARTED": "SCHEDULED",
@@ -162,7 +169,7 @@ def normalize_status(
 
 
 # ============================================================================
-# DATETIME
+# DATETIME NORMALIZATION
 # ============================================================================
 
 def normalize_datetime(
@@ -179,10 +186,15 @@ def normalize_datetime(
         "+00:00",
     )
 
-    value = value.replace(
-        "Z",
-        "+00:00",
-    )
+    if value.endswith("Z"):
+        value = (
+            value[:-1]
+            + "+00:00"
+        )
+
+    # ------------------------------------------------------------------------
+    # ISO-8601
+    # ------------------------------------------------------------------------
 
     try:
 
@@ -190,18 +202,31 @@ def normalize_datetime(
             value
         )
 
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(
+                tzinfo=timezone.utc
+            )
+
         return parsed.isoformat()
 
     except ValueError:
         pass
+
+    # ------------------------------------------------------------------------
+    # Common date formats
+    # ------------------------------------------------------------------------
 
     formats = (
         "%Y-%m-%d",
         "%Y/%m/%d",
         "%d/%m/%Y",
         "%d.%m.%Y",
+
         "%Y-%m-%d %H:%M",
         "%Y-%m-%d %H:%M:%S",
+
+        "%Y/%m/%d %H:%M",
+        "%Y/%m/%d %H:%M:%S",
     )
 
     for fmt in formats:
@@ -231,7 +256,10 @@ def extract_team(
     value: Any,
 ) -> dict[str, Any]:
 
-    if isinstance(value, dict):
+    if isinstance(
+        value,
+        dict,
+    ):
 
         team_id = (
             value.get("id")
@@ -292,7 +320,6 @@ def normalize_match_id(
             f"{source_match_id}"
         )
 
-    # Deterministic fallback.
     home = clean_string(
         record.get("homeTeam")
         or record.get("team1")
@@ -408,8 +435,7 @@ def normalize_json_match(
         or record.get("matchStatus")
     )
 
-    # OpenFootball JSON uses team1/team2/date.
-    # Therefore a valid match can have no explicit ID.
+    # A match must have both teams and a valid date.
     if (
         home["name"] is None
         or away["name"] is None
@@ -472,7 +498,6 @@ def discover_json_records(
                 item,
                 dict,
             ):
-
                 records.append(item)
 
         return records
@@ -532,40 +557,23 @@ def discover_json_records(
 
 
 # ============================================================================
-# FOOTBALL.TXT PARSER
+# FOOTBALL.TXT DATE PARSING
 # ============================================================================
-
-def extract_season_year(
-    path: Path,
-) -> int | None:
-
-    matches = re.findall(
-        r"20\d{2}",
-        str(path),
-    )
-
-    if not matches:
-        return None
-
-    return int(
-        matches[-1]
-    )
-
 
 def parse_football_date(
     line: str,
     current_year: int,
 ) -> tuple[int, int, int] | None:
-
     """
-    Parse common Football.TXT date lines.
+    Parse common Football.TXT date lines safely.
 
     Examples:
-
         Sun Aug 23 2026
         Sun Aug 23
         Aug 23 2026
         Aug 23
+
+    Invalid calendar dates are rejected instead of raising an exception.
     """
 
     clean = line.strip()
@@ -601,24 +609,68 @@ def parse_football_date(
             .lower()
         )
 
-        day = int(
-            match.group(2)
-        )
+        try:
+
+            day = int(
+                match.group(2)
+            )
+
+        except ValueError:
+
+            return None
 
         year_value = match.group(3)
 
-        year = (
-            int(year_value)
-            if year_value
-            else current_year
-        )
+        try:
+
+            year = (
+                int(year_value)
+                if year_value
+                else current_year
+            )
+
+        except ValueError:
+
+            return None
 
         month = MONTHS.get(
             month_name
         )
 
         if month is None:
-            continue
+            return None
+
+        # --------------------------------------------------------------------
+        # CRITICAL SAFETY CHECK
+        #
+        # Never allow an invalid calendar date to reach datetime().
+        # --------------------------------------------------------------------
+
+        try:
+
+            max_day = calendar.monthrange(
+                year,
+                month,
+            )[1]
+
+        except (
+            ValueError,
+            OverflowError,
+        ):
+
+            return None
+
+        if day < 1 or day > max_day:
+
+            print(
+                "[NORMALIZE][WARNING] "
+                f"Invalid calendar date ignored: "
+                f"{year}-{month:02d}-{day:02d} "
+                f"from line: {line!r}",
+                file=sys.stderr,
+            )
+
+            return None
 
         return (
             year,
@@ -628,6 +680,41 @@ def parse_football_date(
 
     return None
 
+
+def looks_like_date_line(
+    line: str,
+) -> bool:
+
+    """
+    Determine whether a line resembles a date line.
+
+    This prevents an invalid date line from accidentally being parsed
+    as a team-v-team match.
+    """
+
+    patterns = (
+
+        r"^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)"
+        r"\s+[A-Za-z]+\s+\d{1,2}"
+        r"(?:\s+\d{4})?",
+
+        r"^[A-Za-z]+\s+\d{1,2}"
+        r"(?:\s+\d{4})?",
+    )
+
+    return any(
+        re.match(
+            pattern,
+            line,
+            re.IGNORECASE,
+        )
+        for pattern in patterns
+    )
+
+
+# ============================================================================
+# FOOTBALL.TXT TIME PARSING
+# ============================================================================
 
 def parse_football_time(
     line: str,
@@ -643,13 +730,19 @@ def parse_football_time(
     if not match:
         return None
 
-    hour = int(
-        match.group(1)
-    )
+    try:
 
-    minute = int(
-        match.group(2)
-    )
+        hour = int(
+            match.group(1)
+        )
+
+        minute = int(
+            match.group(2)
+        )
+
+    except ValueError:
+
+        return None
 
     if hour > 23 or minute > 59:
         return None
@@ -660,36 +753,33 @@ def parse_football_time(
     )
 
 
+# ============================================================================
+# FOOTBALL.TXT MATCH PARSING
+# ============================================================================
+
 def strip_score(
     team: str,
 ) -> str:
 
-    """
-    Remove Football.TXT score suffixes.
-
-    Examples:
-
-        Bayern  3-0  Dortmund
-        Argentina 3-3 France [aet; 4-2 on pens]
-    """
-
-    team = re.sub(
+    return re.sub(
         r"\s+\d+\s*[-–]\s*\d+.*$",
         "",
         team,
-    )
-
-    return team.strip()
+    ).strip()
 
 
 def parse_match_line(
     line: str,
-) -> tuple[str, str, int | None, int | None] | None:
-
+) -> tuple[
+    str,
+    str,
+    int | None,
+    int | None,
+] | None:
     """
-    Parse a Football.TXT match line.
+    Parse common Football.TXT match lines.
 
-    Common examples:
+    Supported examples:
 
         Udinese Calcio v Como 1907
 
@@ -697,7 +787,7 @@ def parse_match_line(
 
         Argentina v France
 
-    We deliberately support 'v' / 'vs' as the primary separator.
+        Argentina 3-3 France
     """
 
     clean = line.strip()
@@ -705,13 +795,19 @@ def parse_match_line(
     if not clean:
         return None
 
-    # Ignore headings/comments/metadata.
+    # Ignore comments/headings.
     if clean.startswith(
-        ("#", "=", "▪", "»", "|")
+        (
+            "#",
+            "=",
+            "▪",
+            "»",
+            "|",
+        )
     ):
         return None
 
-    # Remove venue.
+    # Remove venue suffix.
     clean = re.split(
         r"\s+@\s+",
         clean,
@@ -725,9 +821,16 @@ def parse_match_line(
         clean,
     )
 
-    # ---------------------------------------------------------------
+    # Remove common bullet prefix.
+    clean = re.sub(
+        r"^[•*]\s*",
+        "",
+        clean,
+    ).strip()
+
+    # ------------------------------------------------------------------------
     # Separator: v / vs
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------------
 
     separator = re.search(
         r"\s+(?:v|vs\.?)\s+",
@@ -745,24 +848,25 @@ def parse_match_line(
             separator.end():
         ].strip()
 
+        # Remove annotations.
         away = re.sub(
             r"\s+\[.*$",
             "",
             away,
-        )
+        ).strip()
 
         if home and away:
 
             return (
-                home,
-                away,
+                strip_score(home),
+                strip_score(away),
                 None,
                 None,
             )
 
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------------
     # Separator: score
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------------
 
     score = re.search(
         r"\s+(\d+)\s*[-–]\s*(\d+)\s+",
@@ -783,18 +887,39 @@ def parse_match_line(
             r"\s+\[.*$",
             "",
             away,
-        )
+        ).strip()
 
         if home and away:
 
             return (
-                home,
-                away,
+                strip_score(home),
+                strip_score(away),
                 int(score.group(1)),
                 int(score.group(2)),
             )
 
     return None
+
+
+# ============================================================================
+# FOOTBALL.TXT PARSER
+# ============================================================================
+
+def extract_season_year(
+    path: Path,
+) -> int | None:
+
+    matches = re.findall(
+        r"20\d{2}",
+        str(path),
+    )
+
+    if not matches:
+        return None
+
+    return int(
+        matches[-1]
+    )
 
 
 def parse_football_txt(
@@ -836,9 +961,9 @@ def parse_football_txt(
         if not line:
             continue
 
-        # ---------------------------------------------------------------
+        # --------------------------------------------------------------------
         # Competition title
-        # ---------------------------------------------------------------
+        # --------------------------------------------------------------------
 
         if line.startswith("="):
 
@@ -855,16 +980,16 @@ def parse_football_txt(
 
             continue
 
-        # ---------------------------------------------------------------
+        # --------------------------------------------------------------------
         # Comments / metadata
-        # ---------------------------------------------------------------
+        # --------------------------------------------------------------------
 
         if line.startswith("#"):
             continue
 
-        # ---------------------------------------------------------------
+        # --------------------------------------------------------------------
         # Date
-        # ---------------------------------------------------------------
+        # --------------------------------------------------------------------
 
         parsed_date = parse_football_date(
             line,
@@ -876,9 +1001,22 @@ def parse_football_txt(
             current_date = parsed_date
             continue
 
-        # ---------------------------------------------------------------
+        # --------------------------------------------------------------------
+        # CRITICAL:
+        #
+        # If the line looks like a date but was invalid, do not allow it
+        # to fall through into the match parser.
+        # --------------------------------------------------------------------
+
+        if looks_like_date_line(
+            line
+        ):
+
+            continue
+
+        # --------------------------------------------------------------------
         # Match
-        # ---------------------------------------------------------------
+        # --------------------------------------------------------------------
 
         parsed_match = parse_match_line(
             line
@@ -887,12 +1025,29 @@ def parse_football_txt(
         if not parsed_match:
             continue
 
-        home, away, home_score, away_score = (
-            parsed_match
-        )
+        (
+            home,
+            away,
+            home_score,
+            away_score,
+        ) = parsed_match
+
+        # --------------------------------------------------------------------
+        # No valid date = do not invent one.
+        # --------------------------------------------------------------------
 
         if current_date is None:
-            # Cannot safely invent a date.
+
+            print(
+                "[NORMALIZE][WARNING] "
+                "Match ignored because no valid "
+                f"date context exists: "
+                f"{line!r}; "
+                f"source={source_path}; "
+                f"line={line_number}",
+                file=sys.stderr,
+            )
+
             continue
 
         year, month, day = current_date
@@ -910,14 +1065,38 @@ def parse_football_txt(
             hour = 0
             minute = 0
 
-        scheduled_at = datetime(
-            year=year,
-            month=month,
-            day=day,
-            hour=hour,
-            minute=minute,
-            tzinfo=timezone.utc,
-        ).isoformat()
+        # --------------------------------------------------------------------
+        # Defensive datetime creation.
+        # --------------------------------------------------------------------
+
+        try:
+
+            scheduled_at = datetime(
+                year=year,
+                month=month,
+                day=day,
+                hour=hour,
+                minute=minute,
+                tzinfo=timezone.utc,
+            ).isoformat()
+
+        except (
+            ValueError,
+            OverflowError,
+        ) as error:
+
+            print(
+                "[NORMALIZE][WARNING] "
+                f"Invalid match datetime ignored: "
+                f"{year}-{month:02d}-{day:02d} "
+                f"{hour:02d}:{minute:02d}; "
+                f"source={source_path}; "
+                f"line={line_number}; "
+                f"error={error}",
+                file=sys.stderr,
+            )
+
+            continue
 
         fallback_id = (
             f"{source_path.stem}:"
@@ -946,7 +1125,10 @@ def parse_football_txt(
 
             "status": (
                 "FINISHED"
-                if home_score is not None
+                if (
+                    home_score is not None
+                    and away_score is not None
+                )
                 else "SCHEDULED"
             ),
 
@@ -960,6 +1142,20 @@ def parse_football_txt(
             },
         }
 
+        # --------------------------------------------------------------------
+        # Preserve score when available.
+        # --------------------------------------------------------------------
+
+        if (
+            home_score is not None
+            and away_score is not None
+        ):
+
+            record["score"] = {
+                "home": home_score,
+                "away": away_score,
+            }
+
         matches.append(
             record
         )
@@ -968,7 +1164,7 @@ def parse_football_txt(
 
 
 # ============================================================================
-# RAW FILE DETECTION
+# RAW FORMAT DETECTION
 # ============================================================================
 
 def detect_format(
@@ -976,19 +1172,18 @@ def detect_format(
     body: bytes,
 ) -> str:
 
-    extension = path.name.lower()
+    filename = path.name.lower()
 
-    if extension.endswith(
+    if filename.endswith(
         ".json.raw"
     ):
         return "json"
 
-    if extension.endswith(
+    if filename.endswith(
         ".txt.raw"
     ):
         return "football.txt"
 
-    # Fallback: inspect content.
     try:
 
         decoded = body.decode(
@@ -1000,7 +1195,10 @@ def detect_format(
         return "unknown"
 
     if decoded.startswith(
-        ("{", "[")
+        (
+            "{",
+            "[",
+        )
     ):
 
         return "json"
@@ -1009,7 +1207,7 @@ def detect_format(
 
 
 # ============================================================================
-# FILE LOADING
+# RAW FILE LOADING
 # ============================================================================
 
 def load_raw_file(
@@ -1033,7 +1231,10 @@ def load_raw_file(
                 )
             )
 
-        except json.JSONDecodeError as error:
+        except (
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+        ) as error:
 
             raise ValueError(
                 f"JSON_PARSE_FAILED: {error}"
@@ -1106,7 +1307,7 @@ def normalize_file(
 
     print()
     print(
-        f"[NORMALIZE] "
+        "[NORMALIZE] "
         f"{raw_path.relative_to(PROJECT_ROOT)}"
     )
 
@@ -1121,7 +1322,7 @@ def normalize_file(
     except Exception as error:
 
         print(
-            f"[NORMALIZE][PARSE_FAILED] "
+            "[NORMALIZE][PARSE_FAILED] "
             f"{raw_path}: {error}",
             file=sys.stderr,
         )
@@ -1167,7 +1368,7 @@ def normalize_file(
         )
 
     print(
-        f"[NORMALIZE] "
+        "[NORMALIZE] "
         f"format={data_format} "
         f"normalized={len(normalized)}"
     )
@@ -1179,7 +1380,7 @@ def normalize_file(
 
 
 # ============================================================================
-# SAVE
+# SAVE NORMALIZED FILE
 # ============================================================================
 
 def save_normalized(
@@ -1285,64 +1486,148 @@ def run() -> int:
         return 1
 
     total_normalized = 0
+
     successful_files = 0
+
+    empty_files = 0
+
     failed_files = 0
+
+    source_counts: dict[
+        str,
+        int,
+    ] = {}
 
     for raw_file in raw_files:
 
-        source_id, matches = (
-            normalize_file(
-                raw_file
+        try:
+
+            source_id, matches = (
+                normalize_file(
+                    raw_file
+                )
             )
-        )
+
+        except Exception as error:
+
+            # ---------------------------------------------------------------
+            # Last-resort file isolation.
+            #
+            # A single malformed source file must never crash normalization
+            # of all other sources.
+            # ---------------------------------------------------------------
+
+            failed_files += 1
+
+            print(
+                "[NORMALIZE][FILE_FAILED] "
+                f"{raw_file}: {error}",
+                file=sys.stderr,
+            )
+
+            continue
 
         if matches:
 
-            save_normalized(
-                source_id,
-                raw_file,
-                matches,
-            )
+            try:
+
+                save_normalized(
+                    source_id,
+                    raw_file,
+                    matches,
+                )
+
+            except Exception as error:
+
+                failed_files += 1
+
+                print(
+                    "[NORMALIZE][SAVE_FAILED] "
+                    f"{raw_file}: {error}",
+                    file=sys.stderr,
+                )
+
+                continue
 
             total_normalized += len(
                 matches
+            )
+
+            source_counts[
+                source_id
+            ] = (
+                source_counts.get(
+                    source_id,
+                    0,
+                )
+                + len(matches)
             )
 
             successful_files += 1
 
         else:
 
-            failed_files += 1
+            empty_files += 1
+
+    # =========================================================================
+    # SUMMARY
+    # =========================================================================
 
     print()
     print("-" * 72)
-    print("NORMALIZATION SUMMARY")
+    print(
+        "NORMALIZATION SUMMARY"
+    )
     print("-" * 72)
 
     print(
-        f"Raw files            : "
+        f"Raw files             : "
         f"{len(raw_files)}"
     )
 
     print(
-        f"Successful files     : "
+        f"Successful files      : "
         f"{successful_files}"
     )
 
     print(
-        f"Files with no matches: "
+        f"Empty/no-match files  : "
+        f"{empty_files}"
+    )
+
+    print(
+        f"Failed files          : "
         f"{failed_files}"
     )
 
     print(
-        f"Normalized matches   : "
+        f"Normalized matches    : "
         f"{total_normalized}"
     )
 
+    if source_counts:
+
+        print()
+        print(
+            "MATCHES BY SOURCE"
+        )
+
+        for source_id in sorted(
+            source_counts
+        ):
+
+            print(
+                f"  {source_id}: "
+                f"{source_counts[source_id]}"
+            )
+
     print("-" * 72)
 
-    # Zero normalized records is a real pipeline failure.
-    # We must not allow an empty dataset to reach publication.
+    # =========================================================================
+    # PIPELINE SAFETY
+    # =========================================================================
+
+    # Never allow an empty normalized dataset to continue toward publication.
 
     if total_normalized == 0:
 
@@ -1354,8 +1639,31 @@ def run() -> int:
 
         return 1
 
+    # File-level failures are reported but do not destroy valid matches
+    # produced by other files. The validation stage will decide whether
+    # the resulting dataset is acceptable for publication.
+
+    if failed_files > 0:
+
+        print(
+            "[NORMALIZE][WARNING] "
+            f"{failed_files} raw file(s) failed "
+            "and were isolated."
+        )
+
+    print(
+        "[NORMALIZE][PASS] "
+        f"{total_normalized} match(es) normalized."
+    )
+
     return 0
 
 
+# ============================================================================
+# ENTRY POINT
+# ============================================================================
+
 if __name__ == "__main__":
-    raise SystemExit(run())
+    raise SystemExit(
+        run()
+    )
