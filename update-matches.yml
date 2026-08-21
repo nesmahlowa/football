@@ -1,0 +1,265 @@
+name: Update Football Matches
+
+on:
+  schedule:
+    # Default schedule.
+    # Final frequency should remain controlled by config/schedule.json.
+    - cron: "0 */6 * * *"
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: football-matches-pipeline
+  cancel-in-progress: false
+
+jobs:
+
+  update-matches:
+
+    name: Fetch → Normalize → Deduplicate → Validate → Build
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 20
+
+    steps:
+
+      # ---------------------------------------------------------------------
+      # 1. Checkout repository
+      # ---------------------------------------------------------------------
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ---------------------------------------------------------------------
+      # 2. Setup Python
+      # ---------------------------------------------------------------------
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      # ---------------------------------------------------------------------
+      # 3. Install validation dependencies
+      # ---------------------------------------------------------------------
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install jsonschema
+          fi
+
+      # ---------------------------------------------------------------------
+      # 4. Verify official pipeline configuration
+      # ---------------------------------------------------------------------
+
+      - name: Verify pipeline configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f source.json
+          test -f config/pipeline.json
+          test -f config/validation.json
+          test -f config/schedule.json
+          test -f schemas/matches.schema.json
+
+          test -f scripts/fetch.py
+          test -f scripts/normalize.py
+          test -f scripts/deduplicate.py
+          test -f scripts/validate.py
+          test -f scripts/build_matches.py
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          files = [
+              Path("source.json"),
+              Path("config/pipeline.json"),
+              Path("config/validation.json"),
+              Path("config/schedule.json"),
+              Path("schemas/matches.schema.json"),
+          ]
+
+          for path in files:
+              with path.open("r", encoding="utf-8") as f:
+                  json.load(f)
+
+              print(f"[CONFIG] VALID JSON: {path}")
+          PY
+
+      # ---------------------------------------------------------------------
+      # 5. Generate pipeline run ID
+      # ---------------------------------------------------------------------
+
+      - name: Generate pipeline run ID
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RUN_ID="github-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          echo "PIPELINE_RUN_ID=${RUN_ID}" >> "$GITHUB_ENV"
+
+          echo "Pipeline Run ID: ${RUN_ID}"
+
+      # ---------------------------------------------------------------------
+      # 6. Fetch
+      # ---------------------------------------------------------------------
+
+      - name: Fetch source data
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python scripts/fetch.py
+
+      # ---------------------------------------------------------------------
+      # 7. Normalize
+      # ---------------------------------------------------------------------
+
+      - name: Normalize source data
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python scripts/normalize.py
+
+      # ---------------------------------------------------------------------
+      # 8. Deduplicate
+      # ---------------------------------------------------------------------
+
+      - name: Deduplicate matches
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python scripts/deduplicate.py
+
+      # ---------------------------------------------------------------------
+      # 9. Validate
+      # ---------------------------------------------------------------------
+
+      - name: Validate dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python scripts/validate.py
+
+      # ---------------------------------------------------------------------
+      # 10. Build official matches.json
+      # ---------------------------------------------------------------------
+
+      - name: Build official matches.json
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python scripts/build_matches.py
+
+      # ---------------------------------------------------------------------
+      # 11. Verify final artifact
+      # ---------------------------------------------------------------------
+
+      - name: Verify published matches.json
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f data/matches.json
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("data/matches.json")
+
+          with path.open("r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          if data.get("schemaVersion") != "1.0":
+              raise SystemExit(
+                  "Invalid matches.json schemaVersion"
+              )
+
+          pipeline = data.get("pipeline", {})
+
+          if pipeline.get("validationStatus") != "PASS":
+              raise SystemExit(
+                  "matches.json was not produced from a PASS validation"
+              )
+
+          if pipeline.get("publicationAllowed") is not True:
+              raise SystemExit(
+                  "matches.json publication was not authorized"
+              )
+
+          if not isinstance(data.get("matches"), list):
+              raise SystemExit(
+                  "matches.json matches field is not an array"
+              )
+
+          print(
+              f"Verified {len(data['matches'])} matches."
+          )
+          print(
+              f"Dataset hash: {data.get('datasetHash')}"
+          )
+          PY
+
+      # ---------------------------------------------------------------------
+      # 12. Show git changes
+      # ---------------------------------------------------------------------
+
+      - name: Check repository changes
+        shell: bash
+        run: |
+          git status --short
+
+      # ---------------------------------------------------------------------
+      # 13. Commit updated data
+      # ---------------------------------------------------------------------
+
+      - name: Commit updated match data
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/matches.json
+          git add diagnostics/pipeline-status.json
+
+          if git diff --cached --quiet; then
+            echo "No dataset changes detected."
+            exit 0
+          fi
+
+          git commit \
+            -m "chore(data): update football matches"
+
+      # ---------------------------------------------------------------------
+      # 14. Push changes
+      # ---------------------------------------------------------------------
+
+      - name: Push updated data
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git push

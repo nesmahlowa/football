@@ -1,0 +1,285 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "matches.schema.json",
+
+  "title": "Football Matches Dataset",
+  "description": "Canonical and validated football match dataset produced by the official data pipeline.",
+
+  "type": "object",
+
+  "additionalProperties": false,
+
+  "required": [
+    "schemaVersion",
+    "generatedAt",
+    "pipeline",
+    "sourceCount",
+    "sourceIds",
+    "matchCount",
+    "datasetHash",
+    "matches"
+  ],
+
+  "properties": {
+
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0"
+    },
+
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+
+    "pipeline": {
+      "$ref": "#/$defs/pipeline"
+    },
+
+    "sourceCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+
+    "sourceIds": {
+      "type": "array",
+      "uniqueItems": true,
+
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+
+    "matchCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+
+    "datasetHash": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+
+    "matches": {
+      "type": "array",
+
+      "items": {
+        "$ref": "#/$defs/match"
+      }
+    }
+  },
+
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "sourceCount": {
+            "const": 0
+          }
+        }
+      },
+
+      "then": {
+        "properties": {
+          "sourceIds": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+
+    {
+      "if": {
+        "properties": {
+          "matchCount": {
+            "const": 0
+          }
+        }
+      },
+
+      "then": {
+        "properties": {
+          "matches": {
+            "maxItems": 0
+          }
+        }
+      }
+    }
+  ],
+
+  "$defs": {
+
+    "pipeline": {
+
+      "type": "object",
+
+      "additionalProperties": false,
+
+      "required": [
+        "stage",
+        "validationStatus",
+        "publicationAllowed"
+      ],
+
+      "properties": {
+
+        "stage": {
+          "type": "string",
+          "const": "BUILD_MATCHES"
+        },
+
+        "validationStatus": {
+          "type": "string",
+          "const": "PASS"
+        },
+
+        "publicationAllowed": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+
+    "competition": {
+
+      "type": "object",
+
+      "additionalProperties": false,
+
+      "required": [
+        "id",
+        "name"
+      ],
+
+      "properties": {
+
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+
+    "team": {
+
+      "type": "object",
+
+      "additionalProperties": false,
+
+      "required": [
+        "id",
+        "name"
+      ],
+
+      "properties": {
+
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+
+    "provenance": {
+
+      "type": "object",
+
+      "additionalProperties": false,
+
+      "required": [
+        "sourceIds"
+      ],
+
+      "properties": {
+
+        "sourceIds": {
+          "type": "array",
+          "uniqueItems": true,
+
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+
+    "match": {
+
+      "type": "object",
+
+      "additionalProperties": false,
+
+      "required": [
+        "id",
+        "competition",
+        "homeTeam",
+        "awayTeam",
+        "scheduledAt",
+        "status"
+      ],
+
+      "properties": {
+
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+
+        "competition": {
+          "$ref": "#/$defs/competition"
+        },
+
+        "homeTeam": {
+          "$ref": "#/$defs/team"
+        },
+
+        "awayTeam": {
+          "$ref": "#/$defs/team"
+        },
+
+        "scheduledAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+
+        "status": {
+          "type": "string",
+
+          "enum": [
+            "SCHEDULED",
+            "LIVE",
+            "FINISHED",
+            "POSTPONED",
+            "CANCELLED",
+            "SUSPENDED",
+            "UNKNOWN"
+          ]
+        },
+
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        }
+      }
+    }
+  }
+}

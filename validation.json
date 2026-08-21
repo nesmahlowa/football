@@ -1,0 +1,150 @@
+```json
+{
+  "schemaVersion": "1.0",
+
+  "validation": {
+    "id": "football_match_data_validation",
+    "name": "Football Match Data Validation",
+    "enabled": true,
+
+    "policy": {
+      "failOnCriticalError": true,
+      "publishOnlyIfValid": true,
+      "preservePreviousDataOnFailure": true,
+      "allowEmptyDataset": false,
+      "allowInvalidRecords": false,
+      "allowDuplicateMatches": false
+    },
+
+    "sourceValidation": {
+      "requireConfiguredSource": true,
+      "requireSuccessfulFetch": false,
+      "requireParsedData": true,
+      "recordSourceFailures": true
+    },
+
+    "recordValidation": {
+      "requiredFields": [
+        "id",
+        "homeTeam",
+        "awayTeam",
+        "scheduledAt",
+        "status"
+      ],
+
+      "requiredTeamFields": [
+        "id",
+        "name"
+      ],
+
+      "teamValidation": {
+        "requireHomeTeam": true,
+        "requireAwayTeam": true,
+        "requireHomeTeamId": true,
+        "requireAwayTeamId": true,
+        "requireHomeTeamName": true,
+        "requireAwayTeamName": true,
+        "allowEmptyTeamName": false
+      },
+
+      "matchIdentity": {
+        "requireMatchId": true,
+        "requireStableIdentity": true,
+        "allowDuplicateIds": false
+      },
+
+      "dateTimeValidation": {
+        "requireScheduledAt": true,
+        "requireValidDateTime": true,
+        "requireIso8601": true,
+        "allowInvalidDateTime": false
+      },
+
+      "statusValidation": {
+        "requireStatus": true,
+        "allowedValues": [
+          "SCHEDULED",
+          "LIVE",
+          "FINISHED",
+          "POSTPONED",
+          "CANCELLED",
+          "SUSPENDED",
+          "UNKNOWN"
+        ]
+      }
+    },
+
+    "duplicateValidation": {
+      "enabled": true,
+      "checkMatchId": true,
+      "checkTeamPair": true,
+      "checkScheduledTime": true,
+      "rejectExactDuplicates": true,
+      "rejectIdentityCollisions": true
+    },
+
+    "datasetValidation": {
+      "requireMatchesArray": true,
+      "minimumMatches": 1,
+      "maximumMatches": 10000,
+
+      "statistics": {
+        "recordRawCount": true,
+        "recordParsedCount": true,
+        "recordNormalizedCount": true,
+        "recordDuplicateCount": true,
+        "recordFinalCount": true
+      }
+    },
+
+    "anomalyDetection": {
+      "enabled": true,
+
+      "matchCount": {
+        "detectUnexpectedDrop": true,
+        "detectUnexpectedIncrease": true,
+        "maximumRelativeChange": 0.8
+      },
+
+      "dataQuality": {
+        "detectMissingTeams": true,
+        "detectMissingDates": true,
+        "detectInvalidStatuses": true,
+        "detectDuplicateMatches": true
+      }
+    },
+
+    "schemaValidation": {
+      "enabled": true,
+      "schemaFile": "schemas/matches.schema.json",
+      "requireSchemaPass": true
+    },
+
+    "publicationGate": {
+      "requiredChecks": [
+        "schemaValidation",
+        "requiredFields",
+        "teamValidation",
+        "matchIdentity",
+        "dateTimeValidation",
+        "statusValidation",
+        "duplicateValidation",
+        "datasetValidation"
+      ],
+
+      "publishOn": "ALL_REQUIRED_CHECKS_PASS",
+      "blockOnCriticalFailure": true
+    },
+
+    "diagnostics": {
+      "enabled": true,
+      "recordValidationStatus": true,
+      "recordFailedChecks": true,
+      "recordWarnings": true,
+      "recordErrorDetails": true,
+      "recordSourceStatistics": true,
+      "recordDatasetStatistics": true
+    }
+  }
+}
+```

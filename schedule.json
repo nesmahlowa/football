@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "1.0",
+
+  "schedule": {
+    "id": "football_match_data_schedule",
+    "name": "Football Match Data Update Schedule",
+    "enabled": true,
+
+    "timezone": "UTC",
+
+    "execution": {
+      "mode": "scheduled",
+      "manualTriggerAllowed": true
+    },
+
+    "interval": {
+      "enabled": true,
+      "unit": "hours",
+      "value": 3
+    },
+
+    "githubActions": {
+      "enabled": true,
+      "cron": "0 */3 * * *",
+      "workflowDispatch": true
+    },
+
+    "executionPolicy": {
+      "allowConcurrentRuns": false,
+      "cancelPreviousRun": false,
+      "continueAfterSourceFailure": true,
+      "retryFailedRun": true,
+      "maxRetries": 2,
+      "retryDelayMinutes": 10
+    },
+
+    "updatePolicy": {
+      "runIfDataChanged": true,
+      "publishOnlyIfDataChanged": true,
+      "preservePreviousDataIfUnchanged": true,
+      "preservePreviousDataOnFailure": true
+    },
+
+    "diagnostics": {
+      "enabled": true,
+      "recordScheduledTime": true,
+      "recordActualStartTime": true,
+      "recordCompletionTime": true,
+      "recordDuration": true,
+      "recordRetryCount": true,
+      "recordExecutionStatus": true
+    }
+  }
+}

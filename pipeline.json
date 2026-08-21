@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "1.0",
+
+  "pipeline": {
+    "id": "football_match_data_pipeline",
+    "name": "Football Match Data Pipeline",
+    "enabled": true
+  },
+
+  "processing": {
+    "fetch": true,
+    "normalize": true,
+    "deduplicate": true,
+    "validate": true,
+    "build": true
+  },
+
+  "sourceSelection": {
+    "sourceRegistry": "source.json",
+    "useEnabledSourcesOnly": true,
+    "processByPriority": true,
+    "continueOnSourceFailure": true
+  },
+
+  "dataPolicy": {
+    "publishOnlyValidatedData": true,
+    "preservePreviousDataOnFailure": true,
+    "allowEmptyDataset": false,
+    "allowInvalidRecords": false,
+    "allowDuplicateMatches": false
+  },
+
+  "publication": {
+    "outputFile": "data/matches.json",
+    "statusFile": "diagnostics/pipeline-status.json",
+    "publishOnlyOnValidationPass": true
+  },
+
+  "diagnostics": {
+    "enabled": true,
+    "recordSourceResults": true,
+    "recordProcessingStatistics": true,
+    "recordValidationResults": true,
+    "recordPublicationResult": true
+  }
+}

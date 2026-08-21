@@ -1,0 +1,206 @@
+FOOTBALL MATCH DATA PIPELINE
+PROJECT LICENSE AND DATA NOTICE
+
+Copyright (c) 2026
+Football Match Data Pipeline Project
+
+======================================================================
+1. PROJECT CODE
+======================================================================
+
+Unless otherwise stated, the original source code contained in this
+repository, including:
+
+- scripts/
+- configuration logic
+- pipeline logic
+- validation logic
+- diagnostic logic
+- workflow definitions
+- other original software components
+
+is licensed under the MIT License.
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+======================================================================
+2. UPSTREAM FOOTBALL DATA
+======================================================================
+
+This repository uses football data originating from OpenFootball
+projects.
+
+The upstream datasets are not relicensed by this repository.
+
+The following configured upstream sources are identified in
+source.json:
+
+- OpenFootball football.json
+- OpenFootball World
+- OpenFootball Europe
+- OpenFootball World Cup
+- OpenFootball South America
+
+The OpenFootball projects identify their relevant datasets, schemas
+and/or scripts as public-domain / CC0 material.
+
+Upstream licensing remains applicable to the respective upstream
+material.
+
+Nothing in this repository is intended to replace, modify, restrict,
+or expand the license or legal status of upstream material.
+
+
+======================================================================
+3. GENERATED DATA
+======================================================================
+
+The file:
+
+    data/matches.json
+
+is a generated artifact produced by the project's data pipeline.
+
+Its contents may include data derived from upstream OpenFootball
+datasets.
+
+The generated artifact must therefore be understood in conjunction
+with the applicable upstream licensing and provenance information.
+
+The project does not claim exclusive copyright ownership over facts,
+fixtures, scores, dates, team names, competition names, or other
+underlying factual data originating from upstream sources.
+
+
+======================================================================
+4. SOURCE ATTRIBUTION AND PROVENANCE
+======================================================================
+
+The authoritative source registry is:
+
+    source.json
+
+Where available, generated match records contain provenance information
+identifying the upstream source or sources from which the record was
+derived.
+
+Users redistributing or commercially using generated datasets should
+retain applicable upstream notices and comply with any applicable
+requirements of the relevant upstream source.
+
+
+======================================================================
+5. NO TRADEMARK LICENSE
+======================================================================
+
+Nothing in this license grants permission to use trademarks, logos,
+team badges, competition logos, league marks, or other protected
+branding belonging to football clubs, leagues, federations,
+competitions, organizations, or other third parties.
+
+Names appearing in the dataset are provided as data identifiers and
+do not constitute a trademark license.
+
+
+======================================================================
+6. NO ENDORSEMENT
+======================================================================
+
+Use of OpenFootball data or references to upstream sources does not
+imply endorsement, sponsorship, affiliation, or partnership between
+the upstream projects and this project or any application using the
+generated dataset.
+
+
+======================================================================
+7. COMMERCIAL USE
+======================================================================
+
+The original code of this repository is licensed under MIT and may be
+used commercially subject to the terms of that license.
+
+Upstream data remains subject to its applicable upstream rights and
+licensing status.
+
+Commercial users are responsible for independently verifying that
+their intended use of the generated data complies with all applicable
+licenses, database rights, trademark rights, laws, platform policies,
+and other legal requirements.
+
+
+======================================================================
+8. IMPORTANT NOTICE
+======================================================================
+
+This file is a project licensing notice and is not legal advice.
+
+The repository maintainer does not represent that every possible
+third-party element that may appear in generated data is free of
+copyright, database rights, trademark rights, or other legal
+restrictions.
+
+Users are responsible for conducting their own legal review before
+using the generated dataset in a commercial product.
+
+
+======================================================================
+9. UPSTREAM REFERENCES
+======================================================================
+
+OpenFootball:
+
+https://github.com/openfootball/football.json
+https://github.com/openfootball/world
+https://github.com/openfootball/europe
+https://github.com/openfootball/worldcup
+https://github.com/openfootball/south-america
+
+The upstream repositories should be consulted for their current
+license files, notices, and terms before redistribution.
+
+
+======================================================================
+10. MIT LICENSE
+======================================================================
+
+MIT License
+
+Copyright (c) 2026 Football Match Data Pipeline Project
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files
+(the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of the Software,
+and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

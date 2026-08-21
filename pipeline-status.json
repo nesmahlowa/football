@@ -1,0 +1,131 @@
+{
+  "schemaVersion": "1.0",
+
+  "pipeline": {
+    "name": "Football Match Data Pipeline",
+    "version": "1.0",
+    "status": "NOT_RUN",
+    "health": "UNKNOWN"
+  },
+
+  "run": {
+    "pipelineRunId": null,
+    "startedAt": null,
+    "completedAt": null,
+    "durationMs": null,
+    "trigger": null
+  },
+
+  "stages": {
+    "fetch": {
+      "status": "NOT_RUN",
+      "startedAt": null,
+      "completedAt": null,
+      "durationMs": null,
+      "sourcesConfigured": 0,
+      "sourcesProcessed": 0,
+      "sourcesSucceeded": 0,
+      "sourcesFailed": 0,
+      "recordsDownloaded": 0,
+      "errorCount": 0,
+      "warningCount": 0
+    },
+
+    "normalize": {
+      "status": "NOT_RUN",
+      "startedAt": null,
+      "completedAt": null,
+      "durationMs": null,
+      "inputRecords": 0,
+      "normalizedRecords": 0,
+      "sourcesProcessed": 0,
+      "sourcesFailed": 0,
+      "errorCount": 0,
+      "warningCount": 0
+    },
+
+    "deduplicate": {
+      "status": "NOT_RUN",
+      "startedAt": null,
+      "completedAt": null,
+      "durationMs": null,
+      "inputRecords": 0,
+      "identifiedRecords": 0,
+      "duplicateRecords": 0,
+      "recordsWithoutSafeIdentity": 0,
+      "uniqueRecords": 0,
+      "errorCount": 0,
+      "warningCount": 0
+    },
+
+    "validate": {
+      "status": "NOT_RUN",
+      "startedAt": null,
+      "completedAt": null,
+      "durationMs": null,
+      "inputRecords": 0,
+      "errors": 0,
+      "warnings": 0,
+      "passedChecks": [],
+      "skippedChecks": [],
+      "publicationAllowed": false
+    },
+
+    "build": {
+      "status": "NOT_RUN",
+      "startedAt": null,
+      "completedAt": null,
+      "durationMs": null,
+      "inputRecords": 0,
+      "outputRecords": 0,
+      "datasetHash": null,
+      "publicationStatus": "NOT_ATTEMPTED",
+      "errorCount": 0,
+      "warningCount": 0
+    }
+  },
+
+  "sources": {
+    "configured": 0,
+    "processed": 0,
+    "succeeded": 0,
+    "failed": 0,
+    "sources": []
+  },
+
+  "dataset": {
+    "rawRecords": 0,
+    "normalizedRecords": 0,
+    "deduplicatedRecords": 0,
+    "validatedRecords": 0,
+    "publishedRecords": 0,
+    "datasetHash": null
+  },
+
+  "quality": {
+    "status": "UNKNOWN",
+    "errors": 0,
+    "warnings": 0,
+    "duplicatesRemoved": 0,
+    "recordsWithoutSafeIdentity": 0,
+    "invalidRecords": 0
+  },
+
+  "publication": {
+    "status": "NOT_ATTEMPTED",
+    "allowed": false,
+    "outputFile": "data/matches.json",
+    "publishedAt": null,
+    "datasetHash": null
+  },
+
+  "diagnostics": {
+    "status": "NOT_RUN",
+    "severity": "INFO",
+    "errorCount": 0,
+    "warningCount": 0,
+    "events": []
+  },
+
+  "lastError": null
+}

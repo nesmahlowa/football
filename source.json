@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "1.0",
+  "sources": [
+    {
+      "id": "openfootball_football_json",
+      "name": "OpenFootball football.json",
+      "provider": "OpenFootball",
+      "type": "open_dataset",
+      "priority": 1,
+      "url": "https://github.com/openfootball/football.json"
+    },
+    {
+      "id": "openfootball_world",
+      "name": "OpenFootball World",
+      "provider": "OpenFootball",
+      "type": "open_dataset",
+      "priority": 2,
+      "url": "https://github.com/openfootball/world"
+    },
+    {
+      "id": "openfootball_europe",
+      "name": "OpenFootball Europe",
+      "provider": "OpenFootball",
+      "type": "open_dataset",
+      "priority": 3,
+      "url": "https://github.com/openfootball/europe"
+    },
+    {
+      "id": "openfootball_worldcup",
+      "name": "OpenFootball World Cup",
+      "provider": "OpenFootball",
+      "type": "open_dataset",
+      "priority": 4,
+      "url": "https://github.com/openfootball/worldcup"
+    },
+    {
+      "id": "openfootball_south_america",
+      "name": "OpenFootball South America",
+      "provider": "OpenFootball",
+      "type": "open_dataset",
+      "priority": 5,
+      "url": "https://github.com/openfootball/south-america"
+    }
+  ]
+}
