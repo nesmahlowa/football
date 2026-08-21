@@ -53,6 +53,8 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: |
+          set -euo pipefail
+
           python -m pip install --upgrade pip
 
           if [ -f requirements.txt ]; then
@@ -117,7 +119,22 @@ jobs:
           echo "Pipeline Run ID: ${RUN_ID}"
 
       # ---------------------------------------------------------------------
-      # 6. Fetch
+      # 6. Prepare runtime directories
+      # ---------------------------------------------------------------------
+
+      - name: Prepare pipeline directories
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p raw
+          mkdir -p normalized
+          mkdir -p validation
+          mkdir -p diagnostics
+          mkdir -p data
+
+      # ---------------------------------------------------------------------
+      # 7. Fetch
       # ---------------------------------------------------------------------
 
       - name: Fetch source data
@@ -125,10 +142,14 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "========================================================================"
+          echo "Football Match Data Pipeline - FETCH"
+          echo "========================================================================"
+
           python scripts/fetch.py
 
       # ---------------------------------------------------------------------
-      # 7. Normalize
+      # 8. Normalize
       # ---------------------------------------------------------------------
 
       - name: Normalize source data
@@ -136,10 +157,14 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "========================================================================"
+          echo "Football Match Data Pipeline - NORMALIZE"
+          echo "========================================================================"
+
           python scripts/normalize.py
 
       # ---------------------------------------------------------------------
-      # 8. Deduplicate
+      # 9. Deduplicate
       # ---------------------------------------------------------------------
 
       - name: Deduplicate matches
@@ -147,35 +172,129 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "========================================================================"
+          echo "Football Match Data Pipeline - DEDUPLICATE"
+          echo "========================================================================"
+
           python scripts/deduplicate.py
 
       # ---------------------------------------------------------------------
-      # 9. Validate
+      # 10. Validate
+      #
+      # IMPORTANT:
+      #
+      # We intentionally do NOT use:
+      #
+      #     set -e
+      #
+      # before validate.py.
+      #
+      # This allows the script to finish and generate its report even when
+      # validation fails.
+      #
+      # The original exit code is captured and returned at the end.
       # ---------------------------------------------------------------------
 
       - name: Validate dataset
         shell: bash
         run: |
-          set -euo pipefail
+          set +e
+
+          echo "========================================================================"
+          echo "Football Match Data Pipeline - VALIDATE"
+          echo "========================================================================"
 
           python scripts/validate.py
 
+          STATUS=$?
+
+          echo
+          echo "------------------------------------------------------------------------"
+          echo "VALIDATION REPORT"
+          echo "------------------------------------------------------------------------"
+
+          if [ -f validation/validation-report.json ]; then
+
+            echo "[VALIDATION] Report found:"
+            echo "validation/validation-report.json"
+            echo
+
+            cat validation/validation-report.json
+
+          else
+
+            echo "[VALIDATION][WARNING] "
+            echo "validation/validation-report.json was not generated."
+
+          fi
+
+          echo
+          echo "------------------------------------------------------------------------"
+          echo "VALIDATION EXIT CODE: ${STATUS}"
+          echo "------------------------------------------------------------------------"
+
+          exit "${STATUS}"
+
       # ---------------------------------------------------------------------
-      # 10. Build official matches.json
+      # 11. Upload validation report
+      #
+      # ALWAYS runs, including when validation fails.
+      #
+      # This makes the report available from:
+      #
+      # GitHub Actions → Run → Artifacts → validation-report
+      # ---------------------------------------------------------------------
+
+      - name: Upload validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-report
+          path: validation/validation-report.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      # ---------------------------------------------------------------------
+      # 12. Upload pipeline diagnostics
+      #
+      # ALWAYS runs so diagnostic information survives a failed pipeline.
+      # ---------------------------------------------------------------------
+
+      - name: Upload pipeline diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-diagnostics
+          path: |
+            diagnostics/**
+            validation/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      # ---------------------------------------------------------------------
+      # 13. Build official matches.json
+      #
+      # This executes only if validation succeeded.
       # ---------------------------------------------------------------------
 
       - name: Build official matches.json
+        if: success()
         shell: bash
         run: |
           set -euo pipefail
 
+          echo "========================================================================"
+          echo "Football Match Data Pipeline - BUILD"
+          echo "========================================================================"
+
           python scripts/build_matches.py
 
       # ---------------------------------------------------------------------
-      # 11. Verify final artifact
+      # 14. Verify final artifact
       # ---------------------------------------------------------------------
 
       - name: Verify published matches.json
+        if: success()
         shell: bash
         run: |
           set -euo pipefail
@@ -208,7 +327,10 @@ jobs:
                   "matches.json publication was not authorized"
               )
 
-          if not isinstance(data.get("matches"), list):
+          if not isinstance(
+              data.get("matches"),
+              list
+          ):
               raise SystemExit(
                   "matches.json matches field is not an array"
               )
@@ -216,25 +338,34 @@ jobs:
           print(
               f"Verified {len(data['matches'])} matches."
           )
+
           print(
               f"Dataset hash: {data.get('datasetHash')}"
           )
           PY
 
       # ---------------------------------------------------------------------
-      # 12. Show git changes
+      # 15. Show git changes
       # ---------------------------------------------------------------------
 
       - name: Check repository changes
+        if: success()
         shell: bash
         run: |
+          set -euo pipefail
+
+          echo "========================================================================"
+          echo "GIT CHANGES"
+          echo "========================================================================"
+
           git status --short
 
       # ---------------------------------------------------------------------
-      # 13. Commit updated data
+      # 16. Commit updated data
       # ---------------------------------------------------------------------
 
       - name: Commit updated match data
+        if: success()
         shell: bash
         run: |
           set -euo pipefail
@@ -243,7 +374,10 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add data/matches.json
-          git add diagnostics/pipeline-status.json
+
+          if [ -f diagnostics/pipeline-status.json ]; then
+            git add diagnostics/pipeline-status.json
+          fi
 
           if git diff --cached --quiet; then
             echo "No dataset changes detected."
@@ -254,10 +388,11 @@ jobs:
             -m "chore(data): update football matches"
 
       # ---------------------------------------------------------------------
-      # 14. Push changes
+      # 17. Push changes
       # ---------------------------------------------------------------------
 
       - name: Push updated data
+        if: success()
         shell: bash
         run: |
           set -euo pipefail
