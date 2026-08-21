@@ -4,43 +4,17 @@
 Football Match Data Pipeline
 Stage: NORMALIZE
 
-Responsibility:
-    Convert raw source records into a common canonical match structure.
+Responsibilities:
+    - Read raw JSON / Football.TXT files
+    - Convert source-specific records into canonical match records
+    - Preserve source provenance
+    - Write normalized/<source_id>__*.json
 
-Pipeline:
-
-    source.json
-        |
-        v
-    fetch.py
-        |
-        v
-    raw/
-        |
-        v
-    normalize.py
-        |
-        v
-    normalized/
-        |
-        v
-    deduplicate.py
-        |
-        v
-    validate.py
-        |
-        v
-    build_matches.py
-        |
-        v
-    data/matches.json
-
-IMPORTANT:
-    This module does NOT:
-        - fetch remote data
-        - deduplicate matches
-        - perform final validation
-        - publish matches.json
+This stage does NOT:
+    - fetch remote data
+    - deduplicate matches
+    - perform final validation
+    - publish matches.json
 """
 
 from __future__ import annotations
@@ -53,9 +27,9 @@ from pathlib import Path
 from typing import Any
 
 
-# ---------------------------------------------------------------------------
-# Paths
-# ---------------------------------------------------------------------------
+# ============================================================================
+# PATHS
+# ============================================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -63,36 +37,54 @@ RAW_DIR = PROJECT_ROOT / "raw"
 NORMALIZED_DIR = PROJECT_ROOT / "normalized"
 
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
+# ============================================================================
+# CONSTANTS
+# ============================================================================
 
 NORMALIZED_SCHEMA_VERSION = "1.0"
 
-
-ALLOWED_STATUSES = {
-    "SCHEDULED",
-    "LIVE",
-    "FINISHED",
-    "POSTPONED",
-    "CANCELLED",
-    "SUSPENDED",
-    "UNKNOWN",
+MONTHS = {
+    "jan": 1,
+    "january": 1,
+    "feb": 2,
+    "february": 2,
+    "mar": 3,
+    "march": 3,
+    "apr": 4,
+    "april": 4,
+    "may": 5,
+    "jun": 6,
+    "june": 6,
+    "jul": 7,
+    "july": 7,
+    "aug": 8,
+    "august": 8,
+    "sep": 9,
+    "sept": 9,
+    "september": 9,
+    "oct": 10,
+    "october": 10,
+    "nov": 11,
+    "november": 11,
+    "dec": 12,
+    "december": 12,
 }
 
 
-# ---------------------------------------------------------------------------
-# Utility
-# ---------------------------------------------------------------------------
+# ============================================================================
+# BASIC UTILITIES
+# ============================================================================
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+
+    return datetime.now(
+        timezone.utc
+    ).isoformat()
 
 
-def clean_string(value: Any) -> str | None:
-    """
-    Convert a value to a normalized non-empty string.
-    """
+def clean_string(
+    value: Any,
+) -> str | None:
 
     if value is None:
         return None
@@ -102,20 +94,46 @@ def clean_string(value: Any) -> str | None:
     if not value:
         return None
 
+    value = re.sub(
+        r"\s+",
+        " ",
+        value,
+    )
+
     return value
 
 
-def normalize_status(value: Any) -> str:
-    """
-    Convert source-specific status values into the canonical status model.
-    """
+def normalize_team_name(
+    value: Any,
+) -> str | None:
+
+    return clean_string(value)
+
+
+def normalize_team_id(
+    value: Any,
+) -> str | None:
+
+    return clean_string(value)
+
+
+# ============================================================================
+# STATUS
+# ============================================================================
+
+def normalize_status(
+    value: Any,
+) -> str:
 
     if value is None:
         return "UNKNOWN"
 
-    raw = str(value).strip().upper()
+    raw = str(
+        value
+    ).strip().upper()
 
     mapping = {
+
         "SCHEDULED": "SCHEDULED",
         "UPCOMING": "SCHEDULED",
         "NOT_STARTED": "SCHEDULED",
@@ -137,25 +155,39 @@ def normalize_status(value: Any) -> str:
         "SUSPENDED": "SUSPENDED",
     }
 
-    return mapping.get(raw, "UNKNOWN")
+    return mapping.get(
+        raw,
+        "UNKNOWN",
+    )
 
 
-def normalize_datetime(value: Any) -> str | None:
-    """
-    Normalize common ISO-8601 datetime representations.
+# ============================================================================
+# DATETIME
+# ============================================================================
 
-    No timezone is invented when the source does not provide one.
-    """
+def normalize_datetime(
+    value: Any,
+) -> str | None:
 
     value = clean_string(value)
 
     if value is None:
         return None
 
-    # Already ISO-like.
+    value = value.replace(
+        " UTC",
+        "+00:00",
+    )
+
+    value = value.replace(
+        "Z",
+        "+00:00",
+    )
+
     try:
+
         parsed = datetime.fromisoformat(
-            value.replace("Z", "+00:00")
+            value
         )
 
         return parsed.isoformat()
@@ -163,18 +195,23 @@ def normalize_datetime(value: Any) -> str | None:
     except ValueError:
         pass
 
-    # Common football-data date format.
     formats = (
         "%Y-%m-%d",
-        "%d/%m/%Y",
         "%Y/%m/%d",
+        "%d/%m/%Y",
         "%d.%m.%Y",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d %H:%M:%S",
     )
 
     for fmt in formats:
 
         try:
-            parsed = datetime.strptime(value, fmt)
+
+            parsed = datetime.strptime(
+                value,
+                fmt,
+            )
 
             return parsed.replace(
                 tzinfo=timezone.utc
@@ -186,34 +223,12 @@ def normalize_datetime(value: Any) -> str | None:
     return None
 
 
-def normalize_team_id(value: Any) -> str | None:
-    value = clean_string(value)
-
-    if value is None:
-        return None
-
-    return value
-
-
-def normalize_team_name(value: Any) -> str | None:
-    value = clean_string(value)
-
-    if value is None:
-        return None
-
-    # Normalize repeated whitespace.
-    value = re.sub(r"\s+", " ", value)
-
-    return value
-
-
-# ---------------------------------------------------------------------------
-# Team extraction
-# ---------------------------------------------------------------------------
+# ============================================================================
+# TEAM EXTRACTION
+# ============================================================================
 
 def extract_team(
     value: Any,
-    fallback_id: Any = None,
 ) -> dict[str, Any]:
 
     if isinstance(value, dict):
@@ -223,7 +238,6 @@ def extract_team(
             or value.get("teamId")
             or value.get("team_id")
             or value.get("uid")
-            or fallback_id
         )
 
         team_name = (
@@ -235,23 +249,28 @@ def extract_team(
 
     else:
 
-        team_id = fallback_id
+        team_id = None
         team_name = value
 
     return {
-        "id": normalize_team_id(team_id),
-        "name": normalize_team_name(team_name),
+        "id": normalize_team_id(
+            team_id
+        ),
+        "name": normalize_team_name(
+            team_name
+        ),
     }
 
 
-# ---------------------------------------------------------------------------
-# Match ID
-# ---------------------------------------------------------------------------
+# ============================================================================
+# MATCH ID
+# ============================================================================
 
 def normalize_match_id(
     record: dict[str, Any],
     source_id: str,
-) -> str | None:
+    fallback: str | None = None,
+) -> str:
 
     source_match_id = (
         record.get("id")
@@ -259,33 +278,54 @@ def normalize_match_id(
         or record.get("match_id")
         or record.get("eventId")
         or record.get("event_id")
+        or fallback
     )
 
-    source_match_id = clean_string(source_match_id)
+    source_match_id = clean_string(
+        source_match_id
+    )
 
     if source_match_id:
-        return f"{source_id}:{source_match_id}"
 
-    return None
+        return (
+            f"{source_id}:"
+            f"{source_match_id}"
+        )
+
+    # Deterministic fallback.
+    home = clean_string(
+        record.get("homeTeam")
+        or record.get("team1")
+        or record.get("home")
+    ) or "unknown-home"
+
+    away = clean_string(
+        record.get("awayTeam")
+        or record.get("team2")
+        or record.get("away")
+    ) or "unknown-away"
+
+    date = clean_string(
+        record.get("date")
+        or record.get("scheduledAt")
+    ) or "unknown-date"
+
+    return (
+        f"{source_id}:"
+        f"{date}:"
+        f"{home}:"
+        f"{away}"
+    )
 
 
-# ---------------------------------------------------------------------------
-# Match extraction
-# ---------------------------------------------------------------------------
+# ============================================================================
+# JSON MATCH NORMALIZATION
+# ============================================================================
 
-def normalize_match(
+def normalize_json_match(
     record: dict[str, Any],
     source_id: str,
 ) -> dict[str, Any] | None:
-
-    match_id = normalize_match_id(
-        record,
-        source_id,
-    )
-
-    # ---------------------------------------------------------------
-    # Home team
-    # ---------------------------------------------------------------
 
     home_value = (
         record.get("homeTeam")
@@ -303,14 +343,15 @@ def normalize_match(
         or record.get("visitorTeam")
     )
 
-    home_team = extract_team(home_value)
-    away_team = extract_team(away_value)
+    home = extract_team(
+        home_value
+    )
 
-    # ---------------------------------------------------------------
-    # Date/time
-    # ---------------------------------------------------------------
+    away = extract_team(
+        away_value
+    )
 
-    scheduled_value = (
+    date_value = (
         record.get("scheduledAt")
         or record.get("scheduled_at")
         or record.get("date")
@@ -321,12 +362,45 @@ def normalize_match(
     )
 
     scheduled_at = normalize_datetime(
-        scheduled_value
+        date_value
     )
 
-    # ---------------------------------------------------------------
-    # Status
-    # ---------------------------------------------------------------
+    competition_value = record.get(
+        "competition"
+    )
+
+    if isinstance(
+        competition_value,
+        dict,
+    ):
+
+        competition_id = (
+            competition_value.get("id")
+            or competition_value.get(
+                "competitionId"
+            )
+        )
+
+        competition_name = (
+            competition_value.get("name")
+            or competition_value.get(
+                "competitionName"
+            )
+        )
+
+    else:
+
+        competition_id = (
+            record.get("competitionId")
+            or record.get("competition_id")
+        )
+
+        competition_name = (
+            record.get("competitionName")
+            or record.get("league")
+            or record.get("leagueName")
+            or competition_value
+        )
 
     status = normalize_status(
         record.get("status")
@@ -334,51 +408,19 @@ def normalize_match(
         or record.get("matchStatus")
     )
 
-    # ---------------------------------------------------------------
-    # Competition
-    # ---------------------------------------------------------------
-
-    competition = record.get(
-        "competition"
-    )
-
-    if not isinstance(competition, dict):
-        competition = {}
-
-    competition_id = (
-        competition.get("id")
-        or competition.get("competitionId")
-        or record.get("competitionId")
-        or record.get("competition_id")
-    )
-
-    competition_name = (
-        competition.get("name")
-        or competition.get("competitionName")
-        or record.get("competitionName")
-        or record.get("league")
-        or record.get("leagueName")
-    )
-
-    # ---------------------------------------------------------------
-    # Reject completely unusable records.
-    #
-    # Detailed validation is NOT performed here.
-    # We only avoid creating a canonical record from an object that
-    # clearly contains no match information.
-    # ---------------------------------------------------------------
-
+    # OpenFootball JSON uses team1/team2/date.
+    # Therefore a valid match can have no explicit ID.
     if (
-        match_id is None
-        and home_team["name"] is None
-        and away_team["name"] is None
-        and scheduled_at is None
+        home["name"] is None
+        or away["name"] is None
+        or scheduled_at is None
     ):
         return None
 
-    # ---------------------------------------------------------------
-    # Canonical representation
-    # ---------------------------------------------------------------
+    match_id = normalize_match_id(
+        record,
+        source_id,
+    )
 
     return {
         "id": match_id,
@@ -392,46 +434,55 @@ def normalize_match(
             ),
         },
 
-        "homeTeam": home_team,
+        "homeTeam": home,
 
-        "awayTeam": away_team,
+        "awayTeam": away,
 
         "scheduledAt": scheduled_at,
 
         "status": status,
+
+        "provenance": {
+            "sourceId": source_id,
+            "format": "json",
+        },
     }
 
 
-# ---------------------------------------------------------------------------
-# Recursive record discovery
-# ---------------------------------------------------------------------------
+# ============================================================================
+# JSON RECORD DISCOVERY
+# ============================================================================
 
-def discover_records(
+def discover_json_records(
     data: Any,
 ) -> list[dict[str, Any]]:
-    """
-    Recursively search a JSON document for dictionary objects that may
-    represent match records.
 
-    This intentionally does not assume that every source uses the same
-    top-level JSON structure.
-    """
+    records: list[
+        dict[str, Any]
+    ] = []
 
-    records: list[dict[str, Any]] = []
-
-    if isinstance(data, list):
+    if isinstance(
+        data,
+        list,
+    ):
 
         for item in data:
-            records.extend(
-                discover_records(item)
-            )
+
+            if isinstance(
+                item,
+                dict,
+            ):
+
+                records.append(item)
 
         return records
 
-    if not isinstance(data, dict):
+    if not isinstance(
+        data,
+        dict,
+    ):
         return records
 
-    # Common collection keys used by football datasets.
     collection_keys = (
         "matches",
         "fixtures",
@@ -446,141 +497,694 @@ def discover_records(
 
         value = data.get(key)
 
-        if isinstance(value, list):
+        if not isinstance(
+            value,
+            list,
+        ):
+            continue
 
-            found_collection = True
+        found_collection = True
 
-            for item in value:
+        for item in value:
 
-                if isinstance(item, dict):
-                    records.append(item)
+            if isinstance(
+                item,
+                dict,
+            ):
+                records.append(item)
 
-                else:
-                    records.extend(
-                        discover_records(item)
-                    )
-
-    # If no obvious match collection exists, inspect nested objects.
     if not found_collection:
 
         for value in data.values():
 
-            if isinstance(value, (dict, list)):
+            if isinstance(
+                value,
+                (dict, list),
+            ):
+
                 records.extend(
-                    discover_records(value)
+                    discover_json_records(
+                        value
+                    )
                 )
 
     return records
 
 
-# ---------------------------------------------------------------------------
-# Raw file loading
-# ---------------------------------------------------------------------------
+# ============================================================================
+# FOOTBALL.TXT PARSER
+# ============================================================================
+
+def extract_season_year(
+    path: Path,
+) -> int | None:
+
+    matches = re.findall(
+        r"20\d{2}",
+        str(path),
+    )
+
+    if not matches:
+        return None
+
+    return int(
+        matches[-1]
+    )
+
+
+def parse_football_date(
+    line: str,
+    current_year: int,
+) -> tuple[int, int, int] | None:
+
+    """
+    Parse common Football.TXT date lines.
+
+    Examples:
+
+        Sun Aug 23 2026
+        Sun Aug 23
+        Aug 23 2026
+        Aug 23
+    """
+
+    clean = line.strip()
+
+    patterns = (
+
+        r"^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)"
+        r"\s+"
+        r"([A-Za-z]+)"
+        r"\s+"
+        r"(\d{1,2})"
+        r"(?:\s+(\d{4}))?",
+
+        r"^([A-Za-z]+)"
+        r"\s+"
+        r"(\d{1,2})"
+        r"(?:\s+(\d{4}))?",
+    )
+
+    for pattern in patterns:
+
+        match = re.match(
+            pattern,
+            clean,
+            re.IGNORECASE,
+        )
+
+        if not match:
+            continue
+
+        month_name = (
+            match.group(1)
+            .lower()
+        )
+
+        day = int(
+            match.group(2)
+        )
+
+        year_value = match.group(3)
+
+        year = (
+            int(year_value)
+            if year_value
+            else current_year
+        )
+
+        month = MONTHS.get(
+            month_name
+        )
+
+        if month is None:
+            continue
+
+        return (
+            year,
+            month,
+            day,
+        )
+
+    return None
+
+
+def parse_football_time(
+    line: str,
+) -> tuple[int, int] | None:
+
+    match = re.search(
+        r"(?<!\d)"
+        r"(\d{1,2}):(\d{2})"
+        r"(?!\d)",
+        line,
+    )
+
+    if not match:
+        return None
+
+    hour = int(
+        match.group(1)
+    )
+
+    minute = int(
+        match.group(2)
+    )
+
+    if hour > 23 or minute > 59:
+        return None
+
+    return (
+        hour,
+        minute,
+    )
+
+
+def strip_score(
+    team: str,
+) -> str:
+
+    """
+    Remove Football.TXT score suffixes.
+
+    Examples:
+
+        Bayern  3-0  Dortmund
+        Argentina 3-3 France [aet; 4-2 on pens]
+    """
+
+    team = re.sub(
+        r"\s+\d+\s*[-–]\s*\d+.*$",
+        "",
+        team,
+    )
+
+    return team.strip()
+
+
+def parse_match_line(
+    line: str,
+) -> tuple[str, str, int | None, int | None] | None:
+
+    """
+    Parse a Football.TXT match line.
+
+    Common examples:
+
+        Udinese Calcio v Como 1907
+
+        Bayern München 2-0 VfL Wolfsburg
+
+        Argentina v France
+
+    We deliberately support 'v' / 'vs' as the primary separator.
+    """
+
+    clean = line.strip()
+
+    if not clean:
+        return None
+
+    # Ignore headings/comments/metadata.
+    if clean.startswith(
+        ("#", "=", "▪", "»", "|")
+    ):
+        return None
+
+    # Remove venue.
+    clean = re.split(
+        r"\s+@\s+",
+        clean,
+        maxsplit=1,
+    )[0].strip()
+
+    # Remove leading time.
+    clean = re.sub(
+        r"^\d{1,2}:\d{2}\s+",
+        "",
+        clean,
+    )
+
+    # ---------------------------------------------------------------
+    # Separator: v / vs
+    # ---------------------------------------------------------------
+
+    separator = re.search(
+        r"\s+(?:v|vs\.?)\s+",
+        clean,
+        re.IGNORECASE,
+    )
+
+    if separator:
+
+        home = clean[
+            :separator.start()
+        ].strip()
+
+        away = clean[
+            separator.end():
+        ].strip()
+
+        away = re.sub(
+            r"\s+\[.*$",
+            "",
+            away,
+        )
+
+        if home and away:
+
+            return (
+                home,
+                away,
+                None,
+                None,
+            )
+
+    # ---------------------------------------------------------------
+    # Separator: score
+    # ---------------------------------------------------------------
+
+    score = re.search(
+        r"\s+(\d+)\s*[-–]\s*(\d+)\s+",
+        clean,
+    )
+
+    if score:
+
+        home = clean[
+            :score.start()
+        ].strip()
+
+        away = clean[
+            score.end():
+        ].strip()
+
+        away = re.sub(
+            r"\s+\[.*$",
+            "",
+            away,
+        )
+
+        if home and away:
+
+            return (
+                home,
+                away,
+                int(score.group(1)),
+                int(score.group(2)),
+            )
+
+    return None
+
+
+def parse_football_txt(
+    text: str,
+    source_id: str,
+    source_path: Path,
+) -> list[dict[str, Any]]:
+
+    lines = text.splitlines()
+
+    matches: list[
+        dict[str, Any]
+    ] = []
+
+    current_date: tuple[
+        int,
+        int,
+        int,
+    ] | None = None
+
+    current_year = (
+        extract_season_year(
+            source_path
+        )
+        or datetime.now(
+            timezone.utc
+        ).year
+    )
+
+    competition_name: str | None = None
+
+    for line_number, raw_line in enumerate(
+        lines,
+        start=1,
+    ):
+
+        line = raw_line.strip()
+
+        if not line:
+            continue
+
+        # ---------------------------------------------------------------
+        # Competition title
+        # ---------------------------------------------------------------
+
+        if line.startswith("="):
+
+            title = line[1:].strip()
+
+            title = re.sub(
+                r"\s+#.*$",
+                "",
+                title,
+            ).strip()
+
+            if title:
+                competition_name = title
+
+            continue
+
+        # ---------------------------------------------------------------
+        # Comments / metadata
+        # ---------------------------------------------------------------
+
+        if line.startswith("#"):
+            continue
+
+        # ---------------------------------------------------------------
+        # Date
+        # ---------------------------------------------------------------
+
+        parsed_date = parse_football_date(
+            line,
+            current_year,
+        )
+
+        if parsed_date:
+
+            current_date = parsed_date
+            continue
+
+        # ---------------------------------------------------------------
+        # Match
+        # ---------------------------------------------------------------
+
+        parsed_match = parse_match_line(
+            line
+        )
+
+        if not parsed_match:
+            continue
+
+        home, away, home_score, away_score = (
+            parsed_match
+        )
+
+        if current_date is None:
+            # Cannot safely invent a date.
+            continue
+
+        year, month, day = current_date
+
+        match_time = parse_football_time(
+            line
+        )
+
+        if match_time:
+
+            hour, minute = match_time
+
+        else:
+
+            hour = 0
+            minute = 0
+
+        scheduled_at = datetime(
+            year=year,
+            month=month,
+            day=day,
+            hour=hour,
+            minute=minute,
+            tzinfo=timezone.utc,
+        ).isoformat()
+
+        fallback_id = (
+            f"{source_path.stem}:"
+            f"{line_number}"
+        )
+
+        record = {
+            "id": fallback_id,
+
+            "competition": {
+                "id": None,
+                "name": competition_name,
+            },
+
+            "homeTeam": {
+                "id": None,
+                "name": home,
+            },
+
+            "awayTeam": {
+                "id": None,
+                "name": away,
+            },
+
+            "scheduledAt": scheduled_at,
+
+            "status": (
+                "FINISHED"
+                if home_score is not None
+                else "SCHEDULED"
+            ),
+
+            "provenance": {
+                "sourceId": source_id,
+                "format": "football.txt",
+                "sourceFile": str(
+                    source_path
+                ),
+                "sourceLine": line_number,
+            },
+        }
+
+        matches.append(
+            record
+        )
+
+    return matches
+
+
+# ============================================================================
+# RAW FILE DETECTION
+# ============================================================================
+
+def detect_format(
+    path: Path,
+    body: bytes,
+) -> str:
+
+    extension = path.name.lower()
+
+    if extension.endswith(
+        ".json.raw"
+    ):
+        return "json"
+
+    if extension.endswith(
+        ".txt.raw"
+    ):
+        return "football.txt"
+
+    # Fallback: inspect content.
+    try:
+
+        decoded = body.decode(
+            "utf-8"
+        ).lstrip()
+
+    except UnicodeDecodeError:
+
+        return "unknown"
+
+    if decoded.startswith(
+        ("{", "[")
+    ):
+
+        return "json"
+
+    return "football.txt"
+
+
+# ============================================================================
+# FILE LOADING
+# ============================================================================
 
 def load_raw_file(
     path: Path,
-) -> Any:
+) -> tuple[str, Any]:
 
-    with path.open(
-        "r",
-        encoding="utf-8",
-        errors="replace",
-    ) as file:
+    body = path.read_bytes()
 
-        return json.load(file)
+    data_format = detect_format(
+        path,
+        body,
+    )
+
+    if data_format == "json":
+
+        try:
+
+            data = json.loads(
+                body.decode(
+                    "utf-8"
+                )
+            )
+
+        except json.JSONDecodeError as error:
+
+            raise ValueError(
+                f"JSON_PARSE_FAILED: {error}"
+            ) from error
+
+        return (
+            "json",
+            data,
+        )
+
+    if data_format == "football.txt":
+
+        return (
+            "football.txt",
+            body.decode(
+                "utf-8",
+                errors="replace",
+            ),
+        )
+
+    raise ValueError(
+        "Unsupported raw data format."
+    )
 
 
-# ---------------------------------------------------------------------------
-# Source ID extraction
-# ---------------------------------------------------------------------------
+# ============================================================================
+# SOURCE ID
+# ============================================================================
 
-def source_id_from_filename(
+def source_id_from_path(
     path: Path,
 ) -> str:
 
+    relative = path.relative_to(
+        RAW_DIR
+    )
+
+    parts = relative.parts
+
+    if len(parts) >= 2:
+        return parts[0]
+
     filename = path.name
 
-    if filename.endswith(".raw"):
-        return filename[:-4]
+    if filename.endswith(
+        ".raw"
+    ):
+        filename = filename[:-4]
 
-    return path.stem
+    return filename.split(
+        "__",
+        maxsplit=1,
+    )[0]
 
 
-# ---------------------------------------------------------------------------
-# Normalize one source
-# ---------------------------------------------------------------------------
+# ============================================================================
+# NORMALIZE ONE FILE
+# ============================================================================
 
-def normalize_source_file(
+def normalize_file(
     raw_path: Path,
-) -> tuple[str, list[dict[str, Any]]]:
+) -> tuple[
+    str,
+    list[dict[str, Any]],
+]:
 
-    source_id = source_id_from_filename(
+    source_id = source_id_from_path(
         raw_path
     )
 
+    print()
     print(
-        f"[NORMALIZE] Source: {source_id}"
+        f"[NORMALIZE] "
+        f"{raw_path.relative_to(PROJECT_ROOT)}"
     )
 
     try:
-        data = load_raw_file(
-            raw_path
+
+        data_format, data = (
+            load_raw_file(
+                raw_path
+            )
         )
-
-    except json.JSONDecodeError as error:
-
-        print(
-            f"[NORMALIZE][PARSE_FAILED] "
-            f"{source_id}: {error}",
-            file=sys.stderr,
-        )
-
-        return source_id, []
 
     except Exception as error:
 
         print(
-            f"[NORMALIZE][READ_FAILED] "
-            f"{source_id}: {error}",
+            f"[NORMALIZE][PARSE_FAILED] "
+            f"{raw_path}: {error}",
             file=sys.stderr,
         )
 
-        return source_id, []
-
-    raw_records = discover_records(
-        data
-    )
-
-    normalized_records: list[dict[str, Any]] = []
-
-    for record in raw_records:
-
-        normalized = normalize_match(
-            record,
+        return (
             source_id,
+            [],
         )
 
-        if normalized is not None:
-            normalized_records.append(
-                normalized
+    normalized: list[
+        dict[str, Any]
+    ] = []
+
+    if data_format == "json":
+
+        raw_records = (
+            discover_json_records(
+                data
             )
+        )
+
+        for record in raw_records:
+
+            match = normalize_json_match(
+                record,
+                source_id,
+            )
+
+            if match:
+
+                normalized.append(
+                    match
+                )
+
+    elif data_format == "football.txt":
+
+        normalized = (
+            parse_football_txt(
+                data,
+                source_id,
+                raw_path,
+            )
+        )
 
     print(
         f"[NORMALIZE] "
-        f"{source_id}: "
-        f"raw={len(raw_records)} "
-        f"normalized={len(normalized_records)}"
+        f"format={data_format} "
+        f"normalized={len(normalized)}"
     )
 
-    return source_id, normalized_records
+    return (
+        source_id,
+        normalized,
+    )
 
 
-# ---------------------------------------------------------------------------
-# Save normalized data
-# ---------------------------------------------------------------------------
+# ============================================================================
+# SAVE
+# ============================================================================
 
-def save_normalized_source(
+def save_normalized(
     source_id: str,
+    source_file: Path,
     matches: list[dict[str, Any]],
 ) -> Path:
 
@@ -589,17 +1193,40 @@ def save_normalized_source(
         exist_ok=True,
     )
 
+    source_stem = re.sub(
+        r"[^A-Za-z0-9_.-]",
+        "_",
+        source_file.stem,
+    )
+
     output_path = (
         NORMALIZED_DIR
-        / f"{source_id}.json"
+        / f"{source_id}__"
+        f"{source_stem}.json"
     )
 
     payload = {
-        "schemaVersion": NORMALIZED_SCHEMA_VERSION,
-        "sourceId": source_id,
-        "normalizedAt": utc_now(),
-        "matchCount": len(matches),
-        "matches": matches,
+        "schemaVersion":
+            NORMALIZED_SCHEMA_VERSION,
+
+        "sourceId":
+            source_id,
+
+        "sourceFile":
+            str(
+                source_file.relative_to(
+                    PROJECT_ROOT
+                )
+            ),
+
+        "normalizedAt":
+            utc_now(),
+
+        "matchCount":
+            len(matches),
+
+        "matches":
+            matches,
     }
 
     with output_path.open(
@@ -619,76 +1246,73 @@ def save_normalized_source(
     return output_path
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+# ============================================================================
+# MAIN
+# ============================================================================
 
 def run() -> int:
 
     print("=" * 72)
-    print("Football Match Data Pipeline - NORMALIZE")
+    print(
+        "Football Match Data Pipeline - NORMALIZE"
+    )
     print("=" * 72)
 
     if not RAW_DIR.exists():
 
         print(
-            f"[NORMALIZE][FATAL] "
-            f"Raw directory does not exist: {RAW_DIR}",
+            "[NORMALIZE][FATAL] "
+            "raw/ directory does not exist.",
             file=sys.stderr,
         )
 
         return 1
 
     raw_files = sorted(
-        RAW_DIR.glob("*.raw")
+        RAW_DIR.rglob(
+            "*.raw"
+        )
     )
 
     if not raw_files:
 
         print(
             "[NORMALIZE][FATAL] "
-            "No raw source files found.",
+            "No raw files found.",
             file=sys.stderr,
         )
 
         return 1
 
-    total_raw = 0
     total_normalized = 0
-    failed_sources = 0
+    successful_files = 0
+    failed_files = 0
 
     for raw_file in raw_files:
 
-        source_id, matches = normalize_source_file(
-            raw_file
+        source_id, matches = (
+            normalize_file(
+                raw_file
+            )
         )
 
-        if not matches:
+        if matches:
 
-            print(
-                f"[NORMALIZE][WARNING] "
-                f"No normalized matches produced "
-                f"for {source_id}"
+            save_normalized(
+                source_id,
+                raw_file,
+                matches,
             )
 
-            failed_sources += 1
+            total_normalized += len(
+                matches
+            )
 
-        output_path = save_normalized_source(
-            source_id,
-            matches,
-        )
+            successful_files += 1
 
-        total_normalized += len(matches)
+        else:
 
-        print(
-            f"[NORMALIZE] "
-            f"Output: "
-            f"{output_path.relative_to(PROJECT_ROOT)}"
-        )
-
-    # -----------------------------------------------------------------------
-    # Summary
-    # -----------------------------------------------------------------------
+            failed_files += 1
 
     print()
     print("-" * 72)
@@ -696,28 +1320,39 @@ def run() -> int:
     print("-" * 72)
 
     print(
-        f"Raw source files : {len(raw_files)}"
+        f"Raw files            : "
+        f"{len(raw_files)}"
     )
 
     print(
-        f"Sources without normalized data : "
-        f"{failed_sources}"
+        f"Successful files     : "
+        f"{successful_files}"
     )
 
     print(
-        f"Normalized matches : "
+        f"Files with no matches: "
+        f"{failed_files}"
+    )
+
+    print(
+        f"Normalized matches   : "
         f"{total_normalized}"
     )
 
     print("-" * 72)
 
-    # -----------------------------------------------------------------------
-    # Important:
-    #
-    # Normalization does not determine whether the dataset is valid.
-    #
-    # validation.py is responsible for that decision.
-    # -----------------------------------------------------------------------
+    # Zero normalized records is a real pipeline failure.
+    # We must not allow an empty dataset to reach publication.
+
+    if total_normalized == 0:
+
+        print(
+            "[NORMALIZE][FAIL] "
+            "Zero matches were normalized.",
+            file=sys.stderr,
+        )
+
+        return 1
 
     return 0
 
