@@ -1,0 +1,493 @@
+name: Jules - Autonomous AAA Android Development Loop
+
+on:
+  schedule:
+    # Single daily kickoff at 09:00 Tunisia (UTC+1) — the chain continues automatically
+    - cron: "0 8 * * *"
+
+  workflow_dispatch:
+    inputs:
+      session:
+        description: "Session number 1-12, or auto"
+        required: false
+        default: "auto"
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: jules-autonomous-loop
+  cancel-in-progress: false
+
+jobs:
+
+  jules-autonomous-session:
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+
+    steps:
+
+      # ──────────────────────────────────────────────────────────────
+      # 1. Checkout
+      # ──────────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 50
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ──────────────────────────────────────────────────────────────
+      # 2. Daily long-lived branch (jules/YYYY-MM-DD)
+      #    Created automatically from main if it does not exist.
+      #    All sessions of the same day target and merge into this branch.
+      # ──────────────────────────────────────────────────────────────
+      - name: Ensure daily Jules branch
+        id: daily_branch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DATE=$(TZ=Africa/Tunis date +%Y-%m-%d)
+          BRANCH="jules/${DATE}"
+
+          echo "Daily branch: ${BRANCH}"
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin
+
+          if git ls-remote --heads origin "${BRANCH}" | grep -q "refs/heads/${BRANCH}"; then
+            echo "Reusing existing daily branch ${BRANCH}"
+          else
+            echo "Creating new daily branch ${BRANCH} from main"
+            git checkout -B "${BRANCH}" origin/main
+            git push -u origin "${BRANCH}"
+          fi
+
+      # ──────────────────────────────────────────────────────────────
+      # 3. Resolve session number
+      #    - workflow_dispatch + explicit number (1-12) → use that number
+      #    - workflow_dispatch + auto / empty → ALWAYS start from session 1
+      #    - schedule (cron) → ALWAYS start from session 1 (daily kickoff)
+      #    - chained runs pass an explicit number, so they continue correctly
+      #    - stop cleanly after session 12
+      # ──────────────────────────────────────────────────────────────
+      - name: Determine session
+        id: session
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          INPUT="${{ github.event.inputs.session }}"
+          MAX_SESSION=12
+          EVENT="${{ github.event_name }}"
+
+          # Explicit numeric session from manual run or from the auto-chain
+          if [[ "$EVENT" == "workflow_dispatch" \
+                && -n "${INPUT}" \
+                && "${INPUT}" != "auto" \
+                && "${INPUT}" =~ ^[0-9]+$ ]]; then
+            SESSION="${INPUT}"
+            echo "Using explicit session from input: ${SESSION}"
+          else
+            # Manual run with "auto" OR cron kickoff → always start from 1
+            SESSION=1
+            echo "Starting from session 1 (manual auto / daily cron kickoff)"
+          fi
+
+          # Guard: numeric only
+          if ! [[ "${SESSION}" =~ ^[0-9]+$ ]]; then
+            echo "Invalid session value: ${SESSION} — defaulting to 1"
+            SESSION=1
+          fi
+
+          if [[ "${SESSION}" -gt "${MAX_SESSION}" ]]; then
+            echo "All daily sessions completed (session ${SESSION} > ${MAX_SESSION}). Stopping."
+            echo "session=done" >> "$GITHUB_OUTPUT"
+            echo "should_continue=false" >> "$GITHUB_OUTPUT"
+            echo "skip_jules=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Resolved session: ${SESSION}"
+            echo "session=${SESSION}" >> "$GITHUB_OUTPUT"
+            echo "should_continue=true" >> "$GITHUB_OUTPUT"
+            echo "skip_jules=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ──────────────────────────────────────────────────────────────
+      # 4. Early exit when daily loop is finished
+      # ──────────────────────────────────────────────────────────────
+      - name: Stop if daily loop finished
+        if: steps.session.outputs.skip_jules == 'true'
+        shell: bash
+        run: |
+          echo "Daily autonomous loop already finished. Nothing more to do."
+          exit 0
+
+      # ──────────────────────────────────────────────────────────────
+      # 5. Read current repository state (for logs / debugging)
+      # ──────────────────────────────────────────────────────────────
+      - name: Read current state
+        if: steps.session.outputs.skip_jules != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "========================================"
+          echo "JULES AUTONOMOUS DEVELOPMENT SESSION"
+          echo "========================================"
+          echo "Session      : ${{ steps.session.outputs.session }}"
+          echo "Daily branch : ${{ steps.daily_branch.outputs.branch }}"
+          echo "Repository   : ${{ github.repository }}"
+          echo "Commit       : $(git rev-parse HEAD)"
+          echo
+
+          echo "===== STATE ====="
+          if [[ -f .jules/STATE.md ]]; then
+            cat .jules/STATE.md
+          else
+            echo "STATE.md does not exist yet."
+          fi
+
+          echo
+          echo "===== DAILY PLAN ====="
+          if [[ -f .jules/DAILY_PLAN.md ]]; then
+            cat .jules/DAILY_PLAN.md
+          else
+            echo "DAILY_PLAN.md does not exist yet."
+          fi
+
+          echo
+          echo "===== QUALITY GATE ====="
+          if [[ -f .jules/QUALITY_GATE.md ]]; then
+            cat .jules/QUALITY_GATE.md
+          fi
+
+      # ──────────────────────────────────────────────────────────────
+      # 6. Build Jules prompt
+      # ──────────────────────────────────────────────────────────────
+      - name: Build Jules prompt
+        if: steps.session.outputs.skip_jules != 'true'
+        shell: bash
+        env:
+          SESSION: ${{ steps.session.outputs.session }}
+          DAILY_BRANCH: ${{ steps.daily_branch.outputs.branch }}
+        run: |
+          set -euo pipefail
+
+          cat .jules/MASTER_PROMPT.md > jules-prompt.txt
+
+          cat >> jules-prompt.txt <<EOF
+
+          ============================================================
+          CURRENT AUTONOMOUS SESSION
+          ============================================================
+
+          Session: ${SESSION}
+          Target branch (daily): ${DAILY_BRANCH}
+
+          You are operating as part of a continuous autonomous
+          development loop.
+
+          IMPORTANT BRANCH RULE:
+          - All your work must be based on the daily branch "${DAILY_BRANCH}".
+          - Do not create or switch to any other long-lived branch.
+          - The automation will open a PR against "${DAILY_BRANCH}" and merge it.
+
+          The repository state is the source of truth.
+
+          Before doing anything:
+
+          1. Read AGENTS.md.
+          2. Read .jules/STATE.md.
+          3. Read .jules/DAILY_PLAN.md.
+          4. Read .jules/SESSION_LOG.md.
+          5. Read .jules/QUALITY_GATE.md.
+          6. Read .jules/RELEASE_GATE.md.
+          7. Inspect the actual Android source tree.
+          8. Inspect recent Git history.
+          9. Inspect existing tests.
+          10. Determine what is genuinely implemented.
+
+          NEVER assume a feature exists because documentation says it
+          exists.
+
+          NEVER assume a feature is missing because a TODO says it is
+          missing.
+
+          Verify the actual code.
+
+          ============================================================
+          SESSION OBJECTIVE
+          ============================================================
+
+          Execute the appropriate task for session ${SESSION}.
+
+          Do not merely write a report.
+
+          Make real changes to the repository.
+
+          ============================================================
+          CONTINUOUS LOOP RULE
+          ============================================================
+
+          This is not an isolated task.
+
+          Your work must improve the repository for the next Jules
+          session.
+
+          At the end of your work:
+
+          1. Implement the selected improvement.
+          2. Run the strongest relevant validation available.
+          3. Fix failures caused by your changes.
+          4. Update .jules/STATE.md.
+          5. Update .jules/SESSION_LOG.md.
+          6. Update .jules/QUALITY_GATE.md if quality status changed.
+          7. Update .jules/RELEASE_GATE.md if release readiness changed.
+          8. Identify the highest-value unfinished task for the next
+             session.
+          9. Do not fabricate validation results.
+
+          ============================================================
+          HARD STOP CONDITIONS
+          ============================================================
+
+          If you cannot verify something, write:
+
+          NOT VERIFIED
+
+          Do not claim success.
+
+          If a required external service, credential, device, API,
+          signing key, or environment is unavailable:
+
+          mark the requirement as BLOCKED or NOT VERIFIED.
+
+          Do not invent credentials, responses, screenshots, APIs,
+          test results, store metadata, or runtime behavior.
+
+          ============================================================
+          DEFINITION OF DONE
+          ============================================================
+
+          A task is not considered complete merely because code was
+          written.
+
+          It must be:
+
+          - implemented
+          - integrated
+          - buildable
+          - testable
+          - validated where possible
+          - free from obvious placeholders
+          - free from fake production data
+          - consistent with the existing architecture
+          - documented in the state files
+
+          Continue until the selected task is genuinely complete or
+          until a real external blocker prevents completion.
+          EOF
+
+      # ──────────────────────────────────────────────────────────────
+      # 7. Create Jules session (forced onto the daily branch)
+      # ──────────────────────────────────────────────────────────────
+      - name: Create Jules session
+        if: steps.session.outputs.skip_jules != 'true'
+        id: jules
+        shell: bash
+        env:
+          JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
+          REPOSITORY: ${{ github.repository }}
+          DAILY_BRANCH: ${{ steps.daily_branch.outputs.branch }}
+          SESSION: ${{ steps.session.outputs.session }}
+        run: |
+          set -euo pipefail
+
+          PAYLOAD=$(jq -n \
+            --arg prompt "$(cat jules-prompt.txt)" \
+            --arg repo "$REPOSITORY" \
+            --arg branch "$DAILY_BRANCH" \
+            --arg session "$SESSION" \
+            '{
+              prompt: $prompt,
+              title: ("Autonomous Session " + $session + " — " + $branch),
+              sourceContext: {
+                source: ("sources/github/" + $repo),
+                githubRepoContext: {
+                  startingBranch: $branch
+                }
+              },
+              requirePlanApproval: false,
+              automationMode: "AUTO_CREATE_PR"
+            }')
+
+          RESPONSE=$(curl -fsS \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "X-Goog-Api-Key: ${JULES_API_KEY}" \
+            -d "$PAYLOAD" \
+            "https://jules.googleapis.com/v1alpha/sessions")
+
+          echo "$RESPONSE" | jq .
+
+          SESSION_ID=$(echo "$RESPONSE" | jq -r '.id')
+
+          if [[ -z "$SESSION_ID" || "$SESSION_ID" == "null" ]]; then
+            echo "Failed to create Jules session."
+            exit 1
+          fi
+
+          echo "session_id=$SESSION_ID" >> "$GITHUB_OUTPUT"
+
+      # ──────────────────────────────────────────────────────────────
+      # 8. Wait for Jules to finish
+      # ──────────────────────────────────────────────────────────────
+      - name: Wait for Jules
+        if: steps.session.outputs.skip_jules != 'true'
+        shell: bash
+        env:
+          JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
+          SESSION_ID: ${{ steps.jules.outputs.session_id }}
+        run: |
+          set -euo pipefail
+
+          MAX_ATTEMPTS=30
+          SLEEP_SECONDS=60
+
+          for ((i=1; i<=MAX_ATTEMPTS; i++)); do
+
+            RESPONSE=$(curl -fsS \
+              -H "X-Goog-Api-Key: ${JULES_API_KEY}" \
+              "https://jules.googleapis.com/v1alpha/sessions/${SESSION_ID}")
+
+            STATE=$(echo "$RESPONSE" | jq -r '.state')
+
+            echo "Jules state: ${STATE} (attempt ${i}/${MAX_ATTEMPTS})"
+
+            case "$STATE" in
+
+              COMPLETED)
+                echo "Jules completed."
+                echo "$RESPONSE" > jules-session-result.json
+                exit 0
+                ;;
+
+              FAILED)
+                echo "Jules failed."
+                echo "$RESPONSE" | jq .
+                exit 1
+                ;;
+
+              AWAITING_USER_FEEDBACK)
+                echo "Jules is waiting for user feedback."
+                echo "$RESPONSE" | jq .
+                exit 1
+                ;;
+
+              PAUSED)
+                echo "Jules is paused."
+                exit 1
+                ;;
+
+              *)
+                sleep "$SLEEP_SECONDS"
+                ;;
+
+            esac
+
+          done
+
+          echo "Jules did not finish within the execution window."
+          exit 1
+
+      # ──────────────────────────────────────────────────────────────
+      # 9. Show result (always, for debugging)
+      # ──────────────────────────────────────────────────────────────
+      - name: Show Jules result
+        if: always() && steps.session.outputs.skip_jules != 'true'
+        shell: bash
+        run: |
+          if [[ -f jules-session-result.json ]]; then
+            cat jules-session-result.json | jq .
+          fi
+
+      # ──────────────────────────────────────────────────────────────
+      # 10. Merge the Jules PR into the daily branch and delete the
+      #     temporary Jules branch
+      # ──────────────────────────────────────────────────────────────
+      - name: Merge Jules PR into daily branch
+        if: success() && steps.session.outputs.skip_jules != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PR_URL=$(jq -r '.outputs[]?.pullRequest?.url // empty' jules-session-result.json | head -n 1)
+
+          if [[ -z "$PR_URL" ]]; then
+            echo "No Pull Request was returned by Jules."
+            echo "This is not considered success."
+            exit 1
+          fi
+
+          echo "Jules PR: $PR_URL"
+          echo "Target daily branch: ${{ steps.daily_branch.outputs.branch }}"
+
+          # Enable auto-merge (squash) then wait until merged
+          gh pr merge "$PR_URL" \
+            --auto \
+            --squash \
+            --delete-branch || true
+
+          # Poll until the PR is actually merged (or fail after ~10 min)
+          for i in $(seq 1 20); do
+            STATE=$(gh pr view "$PR_URL" --json state -q .state 2>/dev/null || echo "UNKNOWN")
+            echo "PR state: ${STATE}"
+            if [[ "$STATE" == "MERGED" ]]; then
+              echo "PR successfully merged into the daily branch."
+              exit 0
+            fi
+            if [[ "$STATE" == "CLOSED" ]]; then
+              echo "PR was closed without merge."
+              exit 1
+            fi
+            sleep 30
+          done
+
+          echo "Timed out waiting for PR to merge."
+          exit 1
+
+      # ──────────────────────────────────────────────────────────────
+      # 11. Chain: trigger the next session immediately
+      # ──────────────────────────────────────────────────────────────
+      - name: Trigger next session automatically
+        if: success() && steps.session.outputs.should_continue == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CURRENT="${{ steps.session.outputs.session }}"
+          NEXT=$((CURRENT + 1))
+          MAX_SESSION=12
+
+          if [[ "$NEXT" -gt "$MAX_SESSION" ]]; then
+            echo "Reached session ${MAX_SESSION}. Daily autonomous loop finished."
+            exit 0
+          fi
+
+          echo "Session ${CURRENT} completed successfully on branch ${{ steps.daily_branch.outputs.branch }}."
+          echo "Triggering session ${NEXT} immediately..."
+
+          gh workflow run "${{ github.workflow }}" \
+            --ref main \
+            -f session="${NEXT}"
+
+          echo "Session ${NEXT} has been queued."
